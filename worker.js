@@ -140,24 +140,36 @@
       report('STEP', { jobId: job.id, step: 'script', progress: 10 });
       clickBtn('Tạo Ảnh & Phim');
 
-      // 4. Chờ Batch List xuất hiện
+      // 4. Chờ Batch List tab xuất hiện
+      setBadge('⏳ Chờ kịch bản gen...', '#6366f1');
       await waitFor(function () {
-        return Array.from(document.querySelectorAll('button')).some(function (b) {
-          return b.textContent.includes('Batch List') || b.textContent.includes('Tạo Ảnh');
+        return Array.from(document.querySelectorAll('button, [role="tab"]')).some(function (b) {
+          return b.textContent.includes('Batch List');
         });
-      }, 60000, 1000);
+      }, 90000, 1500);
       await sleep(2000);
 
-      // 5. Click tab Batch List nếu cần
-      var batchTab = Array.from(document.querySelectorAll('button')).find(function (b) {
+      // 5. Click tab Batch List
+      var batchTab = Array.from(document.querySelectorAll('button, [role="tab"]')).find(function (b) {
         return b.textContent.includes('Batch List');
       });
-      if (batchTab) { batchTab.click(); await sleep(1000); }
+      if (batchTab) {
+        batchTab.click();
+        setBadge('📋 Đã mở Batch List', '#6366f1');
+        await sleep(2000);
+      }
 
-      // 6. Bấm "Tạo Ảnh"
+      // 6. Bấm "Tạo Ảnh" — tìm nút màu hồng trong Batch List
       setBadge('🖼 Tạo ảnh...', '#FF6B35');
       report('STEP', { jobId: job.id, step: 'img', progress: 30 });
-      var taoAnhBtn = await waitBtn('Tạo Ảnh', 15000);
+
+      // Chờ nút Tạo Ảnh visible trong Batch List
+      var taoAnhBtn = await waitFor(function() {
+        return Array.from(document.querySelectorAll('button')).find(function(b) {
+          var txt = b.textContent.trim();
+          return (txt === 'Tạo Ảnh' || txt.startsWith('Tạo Ảnh')) && !b.disabled && b.offsetParent !== null;
+        });
+      }, 15000, 800);
       taoAnhBtn.click();
       await sleep(2000);
 
