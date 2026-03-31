@@ -5,12 +5,20 @@
   var CH_DET = new BroadcastChannel('3big_v5');
   var decided = false;
 
-  // Kiểm tra ai là manager
-  CH_DET.postMessage({ type: '__CHECK__' });
-  var timer = setTimeout(function () {
-    if (decided) return;
-    decided = true;
+  // Detect: dùng localStorage - tab nào set 'a3b_manager_tab' = tabId của mình thì là manager
+  // Mỗi tab có random ID, lưu vào sessionStorage
+  if (!window.__a3bMyTabId) {
+    window.__a3bMyTabId = Math.random().toString(36).slice(2, 10);
+  }
+
+  var savedManagerId = localStorage.getItem('a3b_manager_tab');
+  var isThisManager = !savedManagerId || savedManagerId === window.__a3bMyTabId;
+
+  if (isThisManager) {
+    // Tab này là Manager
+    localStorage.setItem('a3b_manager_tab', window.__a3bMyTabId);
     window.__a3bIsManager = true;
+    decided = true;
     if (!localStorage.getItem('3big_session')) return;
     injectCSS();
     injectHTML();
@@ -23,20 +31,21 @@
       var el = document.getElementById('a3b-quota');
       if (el) el.textContent = q.remaining + '/' + q.daily_limit + ' video còn';
     }).catch(function () {});
-  }, 600);
 
-  CH_DET.addEventListener('message', function (e) {
-    if (!e.data) return;
-    if (e.data.type === '__MGR__' && !decided) {
-      clearTimeout(timer); decided = true;
-      window.__a3bIsManager = false;
-      if (typeof A3B_WORKER !== 'undefined') return;
-      // worker.js sẽ tự init
-    }
-    if (e.data.type === '__CHECK__' && window.__a3bIsManager) {
-      CH_DET.postMessage({ type: '__MGR__' });
-    }
-  });
+    // Khi đóng tab manager, xóa localStorage
+    window.addEventListener('beforeunload', function() {
+      if (localStorage.getItem('a3b_manager_tab') === window.__a3bMyTabId) {
+        localStorage.removeItem('a3b_manager_tab');
+      }
+    });
+  } else {
+    // Tab này là Worker
+    window.__a3bIsManager = false;
+    decided = true;
+  }
+
+  // Giữ CH_DET để không bị GC
+  window.__a3bChDet = CH_DET;
 
   // ── CSS ─────────────────────────────────
   function injectCSS() {
