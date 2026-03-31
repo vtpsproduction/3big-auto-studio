@@ -266,7 +266,7 @@ var A3B_MANAGER = (function() {
       setTimeout(function() {
         window.open('https://3big.online', '_blank');
         log('Mở Worker ' + (i+1) + ' — ' + w.jobs.length + ' jobs', 'b');
-      }, i * 1200);
+      }, i * 2500);
     });
 
     updStats();
