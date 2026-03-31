@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         3BIG Auto Studio
 // @namespace    https://3big.online
-// @version      4.0.0
+// @version      4.1.0
 // @description  San xuat video hang loat - Manager + Worker
 // @match        https://3big.online/*
 // @grant        none
