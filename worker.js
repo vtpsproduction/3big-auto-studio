@@ -91,14 +91,17 @@ var A3B_WORKER = (function() {
 
     // Tạo tab ID ngẫu nhiên
     window.__a3bTabId = Math.random().toString(36).slice(2, 8);
+    window.__a3bStamp = Date.now(); // Timestamp để manager biết tab nào mới
 
-    // Báo manager online — retry mỗi 2 giây cho đến khi được assign
+    // Báo manager online — retry mỗi 2 giây, tối đa 30 giây
+    var onlineRetry = 0;
     var onlineInterval = setInterval(function() {
       if (myWid !== null) { clearInterval(onlineInterval); return; }
-      ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId });
+      if (onlineRetry++ > 15) { clearInterval(onlineInterval); return; } // Dừng sau 30 giây
+      ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId, stamp: window.__a3bStamp });
     }, 2000);
     setTimeout(function() {
-      ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId });
+      ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId, stamp: window.__a3bStamp });
     }, 500);
 
     ch.onmessage = async function(e) {
