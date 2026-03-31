@@ -1,327 +1,312 @@
-// ═══════════════════════════════════════
-// manager.js — UI điều phối Manager
-// ═══════════════════════════════════════
-
-var A3B_MANAGER = (function() {
-
-  var CH_NAME = '3big_auto_v4';
-  var ch = null;
-
-  // STATE
-  var WORKERS = [];
+// ═══════════════════════════════════════════
+// manager.js — Điều phối 2 worker tabs
+// ═══════════════════════════════════════════
+var A3B = (function () {
+  var CH = new BroadcastChannel('3big_v5');
+  var WORKERS = []; // [{wid, tabId, status, jobs, doneC, errC, currentJob, step, progress}]
   var ALL_JOBS = [];
   var RESULTS = [];
-  var NUM_W = 2;
   var running = false;
   var totalClips = 0;
-  var pendingAssign = []; // wid chờ assign tab
+  var pendingAssign = [];
+  var assignedTabs = {};
 
-  // ── HELPERS ────────────────────────────
-  function parseInput() {
-    var raw = document.getElementById('a3m-ta').value.trim();
-    return raw.split('\n').map(function(l) { return l.trim(); }).filter(Boolean)
-      .reduce(function(acc, line) {
-        try {
-          var o = JSON.parse(line);
-          if (o.nhanVat && o.noiDung) acc.push(o);
-        } catch(e) {}
+  // ── Parse kịch bản ───────────────────────
+  function parseJobs() {
+    var raw = document.getElementById('a3b-ta').value.trim();
+    return raw.split('\n').map(function (l) { return l.trim(); }).filter(Boolean)
+      .reduce(function (acc, line) {
+        try { var o = JSON.parse(line); if (o.nhanVat && o.noiDung) acc.push(o); } catch (e) {}
         return acc;
       }, []);
   }
 
+  // ── Lấy config từ UI ─────────────────────
+  function getConfig() {
+    return {
+      phongCach: document.getElementById('cfg-phong-cach').value,
+      ngonNgu: document.getElementById('cfg-ngon-ngu').value,
+      tiLe: document.querySelector('input[name="ti-le"]:checked')?.value || '9:16',
+      danhMuc: document.getElementById('cfg-danh-muc').value,
+      tone: document.getElementById('cfg-tone').value
+    };
+  }
+
+  // ── Log ──────────────────────────────────
   function log(msg, t) {
-    var el = document.getElementById('a3m-log');
+    var el = document.getElementById('a3b-log');
     if (!el) return;
-    var now = new Date().toLocaleTimeString('vi',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    var now = new Date().toLocaleTimeString('vi', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var colors = { ok: '#10b981', e: '#ef4444', r: '#FF6B35', b: '#6366f1', h: '#d1d5db' };
     var d = document.createElement('div');
-    d.className = 'mll ml' + (t || 'i');
-    d.innerHTML = '<span class="mlt">' + now + '</span><span>' + msg + '</span>';
-    el.appendChild(d); el.scrollTop = el.scrollHeight;
+    d.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:2px 0;border-bottom:1px solid #f3f4f6';
+    d.innerHTML = '<span style="color:#9ca3af;font-size:10px;min-width:52px;flex-shrink:0">' + now + '</span>'
+      + '<span style="color:' + (colors[t] || '#374151') + ';font-size:11px">' + msg + '</span>';
+    el.appendChild(d);
+    el.scrollTop = el.scrollHeight;
   }
-
   function logSep() {
-    var el = document.getElementById('a3m-log');
+    var el = document.getElementById('a3b-log');
     if (!el) return;
-    var d = document.createElement('div'); d.className = 'mlsep'; el.appendChild(d);
+    var d = document.createElement('div');
+    d.style.cssText = 'border-top:2px solid #e5e7eb;margin:6px 0';
+    el.appendChild(d);
   }
 
-  function switchTab(name) {
-    document.querySelectorAll('#a3m-win .a3mt, #a3m-win .a3mp').forEach(function(el) { el.classList.remove('on'); });
-    var tab = document.querySelector('#a3m-win .a3mt[data-t="' + name + '"]');
-    var pane = document.getElementById('a3m-p-' + name);
-    if (tab) tab.classList.add('on');
-    if (pane) pane.classList.add('on');
-  }
-
+  // ── Stats ────────────────────────────────
   function updStats() {
-    var done = RESULTS.filter(function(r) { return r.status === 'done'; }).length;
-    var err  = RESULTS.filter(function(r) { return r.status === 'error'; }).length;
-    var run  = WORKERS.filter(function(w) { return w.status === 'running'; }).length;
-    var els = {
-      's0': ALL_JOBS.length, 's1': run,
-      's2': done, 's3': err, 's4': totalClips
-    };
-    Object.keys(els).forEach(function(id) {
-      var el = document.getElementById('a3m-' + id);
-      if (el) el.textContent = els[id];
-    });
-    var total = ALL_JOBS.length;
-    var pct = total ? (done + err) / total * 100 : 0;
-    var fill = document.getElementById('a3m-fill'); if (fill) fill.style.width = pct + '%';
-    var pd = document.getElementById('a3m-pdone'); if (pd) pd.textContent = (done+err) + '/' + total + ' video';
-    var ps = document.getElementById('a3m-pst');   if (ps)  ps.textContent = run > 0 ? run + ' worker đang chạy...' : (running ? 'Đang phân bổ...' : 'Xong!');
+    var done = RESULTS.filter(function (r) { return r.status === 'done'; }).length;
+    var err = RESULTS.filter(function (r) { return r.status === 'error'; }).length;
+    var runC = WORKERS.filter(function (w) { return w.status === 'running'; }).length;
+
+    setText('stat-total', ALL_JOBS.length);
+    setText('stat-run', runC);
+    setText('stat-done', done);
+    setText('stat-err', err);
+    setText('stat-clip', totalClips);
+
+    var pct = ALL_JOBS.length ? (done + err) / ALL_JOBS.length * 100 : 0;
+    var fill = document.getElementById('a3b-pfill');
+    if (fill) fill.style.width = pct + '%';
+    setText('a3b-pdone', (done + err) + ' / ' + ALL_JOBS.length + ' video');
+    setText('a3b-pst', runC > 0 ? runC + ' worker đang chạy...' : (running ? 'Chuẩn bị...' : 'Sẵn sàng'));
+
+    WORKERS.forEach(function (w) { updWorkerCard(w.wid); });
   }
 
-  function updCard(wid) {
-    var w = WORKERS[wid]; if (!w) return;
-    var badges = {
-      idle:    ['mb0','Chờ kết nối'],
-      ready:   ['mb1','✓ Sẵn sàng'],
-      running: ['mb2','▶ Đang chạy'],
-      done:    ['mb3','✓ Hoàn thành'],
-      error:   ['mb4','✗ Lỗi']
-    };
-    var ba = badges[w.status] || badges.idle;
-    var badge = document.getElementById('a3m-wb-' + wid);
-    var card  = document.getElementById('a3m-wc-' + wid);
-    var dot   = document.getElementById('a3m-wd-' + wid);
-    if (badge) { badge.className = 'mbadge ' + ba[0]; badge.textContent = ba[1]; }
-    if (card)  card.className = 'mwcard' + (w.status==='running'?' mactive':w.status==='done'?' mdone':w.status==='error'?' merr':'');
-    if (dot)   dot.className = 'mwdot' + (w.status==='running'?' mon':w.status==='done'?' mok':'');
-    var jel = document.getElementById('a3m-wj-' + wid);
-    if (jel) { jel.style.color = w.currentJob ? '#888' : '#444'; jel.textContent = w.currentJob ? w.currentJob.nhanVat.slice(0,50) : 'Chờ job...'; }
-    var steps = {script:'⚙ Gen kịch bản...', img:'🖼 Tạo ảnh...', vid:'🎬 Tạo video...', done:'✓ Xong', idle:''};
-    var sel = document.getElementById('a3m-ws-' + wid); if (sel) sel.textContent = steps[w.step] || '';
-    var pel = document.getElementById('a3m-wp-' + wid); if (pel) pel.style.width = (w.progress || 0) + '%';
-    var de = document.getElementById('a3m-wd2-' + wid); if (de) de.textContent = w.doneC || 0;
-    var ee = document.getElementById('a3m-we-' + wid);  if (ee) ee.textContent = w.errC  || 0;
-    var ve = document.getElementById('a3m-wv-' + wid);  if (ve) ve.textContent = w.vidC  || 0;
+  function setText(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; }
 
-    // Queue list
-    var qel = document.getElementById('a3m-wq-' + wid);
-    if (qel && w.jobs) {
-      qel.innerHTML = '';
-      w.jobs.slice(0, 5).forEach(function(job) {
+  // ── Worker Card ──────────────────────────
+  function updWorkerCard(wid) {
+    var w = WORKERS[wid]; if (!w) return;
+    var card = document.getElementById('wcard-' + wid); if (!card) return;
+
+    var statusMap = {
+      idle: { label: 'Chờ kết nối', color: '#9ca3af', bg: '#f9fafb', border: '#e5e7eb' },
+      ready: { label: 'Sẵn sàng', color: '#10b981', bg: '#f0fdf4', border: '#bbf7d0' },
+      running: { label: 'Đang chạy', color: '#FF6B35', bg: '#fff7ed', border: '#fed7aa' },
+      done: { label: 'Hoàn thành', color: '#10b981', bg: '#f0fdf4', border: '#86efac' },
+      error: { label: 'Lỗi', color: '#ef4444', bg: '#fef2f2', border: '#fca5a5' }
+    };
+    var s = statusMap[w.status] || statusMap.idle;
+
+    card.style.borderColor = s.border;
+    card.style.background = s.bg;
+
+    var badge = card.querySelector('.w-badge');
+    if (badge) { badge.textContent = s.label; badge.style.color = s.color; badge.style.borderColor = s.color + '40'; badge.style.background = s.color + '15'; }
+
+    var dot = card.querySelector('.w-dot');
+    if (dot) { dot.style.background = s.color; dot.style.animation = w.status === 'running' ? 'wdot 1s infinite' : 'none'; }
+
+    var jobEl = card.querySelector('.w-job');
+    if (jobEl) {
+      if (w.currentJob) {
+        jobEl.innerHTML = '<div style="font-weight:600;color:#111;font-size:12px;margin-bottom:4px">' + w.currentJob.nhanVat.slice(0, 50) + '</div>'
+          + '<div style="color:#6b7280;font-size:11px">' + w.currentJob.noiDung.slice(0, 70) + '...</div>';
+      } else {
+        jobEl.innerHTML = '<div style="color:#9ca3af;font-size:12px">' + (w.status === 'idle' ? 'Chờ kết nối...' : 'Chờ job mới...') + '</div>';
+      }
+    }
+
+    var steps = { script: 'Tạo kịch bản', img: 'Tạo ảnh', vid: 'Tạo video', retry: 'Tạo lại lỗi', download: 'Tải video', done: 'Hoàn thành' };
+    var stepEl = card.querySelector('.w-step');
+    if (stepEl) stepEl.textContent = steps[w.step] || '';
+
+    var progFill = card.querySelector('.w-prog-fill');
+    if (progFill) progFill.style.width = (w.progress || 0) + '%';
+    var progTxt = card.querySelector('.w-prog-txt');
+    if (progTxt) progTxt.textContent = (w.progress || 0) + '%';
+
+    var statsEl = card.querySelector('.w-stats');
+    if (statsEl) statsEl.innerHTML = 'Xong: <b style="color:#10b981">' + (w.doneC || 0) + '</b> &nbsp; Lỗi: <b style="color:#ef4444">' + (w.errC || 0) + '</b>';
+
+    // Queue
+    var qEl = card.querySelector('.w-queue');
+    if (qEl && w.jobs) {
+      qEl.innerHTML = '';
+      w.jobs.slice(0, 6).forEach(function (job) {
         var st = job.status || 'wait';
-        var d = document.createElement('div');
-        d.className = 'mwqi' + (st==='done'?' qd':st==='running'?' qr':st==='error'?' qe':'');
-        d.innerHTML = '<div class="mqdot"></div><span>' + (job.nhanVat || '—').slice(0, 30) + '</span>';
-        qel.appendChild(d);
+        var colors2 = { wait: '#9ca3af', running: '#FF6B35', done: '#10b981', error: '#ef4444' };
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:11px';
+        row.innerHTML = '<div style="width:6px;height:6px;border-radius:50%;background:' + (colors2[st] || '#9ca3af') + ';flex-shrink:0"></div>'
+          + '<span style="color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + job.nhanVat.slice(0, 38) + '</span>';
+        qEl.appendChild(row);
       });
-      if (w.jobs.length > 5) {
-        var m = document.createElement('div');
-        m.style.cssText = 'font-size:9.5px;color:#333;padding:2px 7px';
-        m.textContent = '+' + (w.jobs.length - 5) + ' job khác';
-        qel.appendChild(m);
+      if (w.jobs.length > 6) {
+        var more = document.createElement('div');
+        more.style.cssText = 'font-size:10px;color:#9ca3af;padding:3px 0';
+        more.textContent = '+' + (w.jobs.length - 6) + ' job khác';
+        qEl.appendChild(more);
       }
     }
   }
 
-  function buildCards(n) {
-    var g = document.getElementById('a3m-wgrid');
-    if (!g) return;
-    g.innerHTML = '';
-    g.style.gridTemplateColumns = n === 1 ? '1fr' : n === 2 ? '1fr 1fr' : '1fr 1fr 1fr';
-    for (var i = 0; i < n; i++) {
-      var c = document.createElement('div');
-      c.className = 'mwcard'; c.id = 'a3m-wc-' + i;
-      c.innerHTML = '<div class="mwhd">'
-        + '<div class="mwnm"><div class="mwdot" id="a3m-wd-' + i + '"></div>Worker ' + (i+1) + '</div>'
-        + '<span class="mbadge mb0" id="a3m-wb-' + i + '">Đang mở tab...</span>'
-        + '</div>'
-        + '<div class="mwbody">'
-        + '<div class="mwcj" id="a3m-wj-' + i + '" style="color:#444">Chờ kết nối...</div>'
-        + '<div class="mwstep" id="a3m-ws-' + i + '"></div>'
-        + '<div class="mwpbar"><div class="mwpfill" id="a3m-wp-' + i + '"></div></div>'
-        + '<div class="mwst">Xong:<b id="a3m-wd2-' + i + '">0</b> Lỗi:<b id="a3m-we-' + i + '">0</b> Clip:<b id="a3m-wv-' + i + '">0</b></div>'
-        + '<div style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:.5px;margin:5px 0 3px">Queue</div>'
-        + '<div id="a3m-wq-' + i + '"><div style="font-size:10px;color:#333">Chờ phân bổ...</div></div>'
-        + '</div>';
-      g.appendChild(c);
-    }
-  }
-
+  // ── Kết quả ──────────────────────────────
   function addResult(r) {
     RESULTS.push(r);
-    var list = document.getElementById('a3m-rlist');
+    var list = document.getElementById('a3b-rlist');
     if (!list) return;
-    var empty = list.querySelector('.mempty'); if (empty) list.innerHTML = '';
-    var div = document.createElement('div');
-    div.className = 'mri' + (r.status === 'done' ? ' mrdone' : ' mrerr');
-    var videos = r.videos || [];
-    div.innerHTML = '<div class="mrn">#' + RESULTS.length + '</div>'
-      + '<div class="mrinfo">'
-      + '<div class="mrt">' + (r.topicTitle || r.nhanVat || '—').slice(0,60) + '</div>'
-      + '<div class="mrm">Worker ' + (r.wid+1) + ' · ' + (r.status==='done' ? '✓ ' + videos.length + ' clip' : '✗ ' + (r.errorMsg||'')) + '</div>'
-      + '</div>'
-      + (r.status==='done' ? '<button class="msm msg" onclick="A3B_MANAGER.dlResult(' + (RESULTS.length-1) + ')">⬇ Tải</button>' : '');
-    list.insertBefore(div, list.firstChild);
+    var empty = list.querySelector('.a3b-empty'); if (empty) list.innerHTML = '';
+
+    var row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:30px 1fr auto auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #f3f4f6;transition:background .15s';
+    row.onmouseenter = function () { row.style.background = '#f9fafb'; };
+    row.onmouseleave = function () { row.style.background = ''; };
+
+    var isDone = r.status === 'done';
+    row.innerHTML = '<div style="width:24px;height:24px;border-radius:50%;background:' + (isDone ? '#d1fae5' : '#fee2e2') + ';display:flex;align-items:center;justify-content:center;font-size:12px">' + (isDone ? '✓' : '✗') + '</div>'
+      + '<div><div style="font-size:12px;font-weight:600;color:#111">' + (r.topicTitle || r.nhanVat || '—').slice(0, 60) + '</div>'
+      + '<div style="font-size:10px;color:#9ca3af;margin-top:2px">Worker ' + (r.wid + 1) + ' · ' + (isDone ? 'Thành công' : 'Lỗi: ' + (r.errorMsg || '')) + '</div></div>'
+      + '<div style="font-size:10px;color:' + (isDone ? '#10b981' : '#ef4444') + ';font-weight:600">' + (isDone ? '✓' : '✗') + '</div>'
+      + '<div></div>';
+    list.insertBefore(row, list.firstChild);
+
+    var badge = document.getElementById('a3b-rb');
+    if (badge) badge.textContent = RESULTS.length;
   }
 
-  // ── NHẬN TIN TỪ WORKER ─────────────────
+  // ── Nhận tin từ Worker ───────────────────
   function initChannel() {
-    ch = new BroadcastChannel(CH_NAME);
-    ch.onmessage = function(e) {
+    CH.onmessage = function (e) {
       var msg = e.data; if (!msg || !msg.type) return;
 
       if (msg.type === 'WORKER_ONLINE') {
         if (!running) return;
-        // Bỏ qua tab đã assign rồi
-        var already = WORKERS.some(function(w) { return w.tabId === msg.tabId; });
-        if (already) return;
+        if (assignedTabs[msg.tabId]) return; // đã assign rồi
         var wid = pendingAssign.shift();
         if (wid === undefined) return;
+        assignedTabs[msg.tabId] = wid;
         WORKERS[wid].tabId = msg.tabId;
-        ch.postMessage({ type: 'ASSIGN', wid: wid, tabId: msg.tabId });
-        log('Worker ' + (wid+1) + ' kết nối ✓', 'b');
+        CH.postMessage({ type: 'ASSIGN', wid: wid, tabId: msg.tabId });
+        log('Worker ' + (wid + 1) + ' kết nối ✓', 'ok');
         return;
       }
 
-      var wid = msg.wid;
-      if (wid === undefined || !WORKERS[wid]) return;
+      var wid = msg.wid; if (wid === undefined || !WORKERS[wid]) return;
       var w = WORKERS[wid];
 
       if (msg.type === 'READY') {
-        w.status = 'ready'; updCard(wid);
-        log('Worker ' + (wid+1) + ' sẵn sàng ✓', 'ok');
-        var allReady = WORKERS.every(function(x) { return x.status !== 'idle'; });
+        w.status = 'ready'; updStats();
+        log('Worker ' + (wid + 1) + ' sẵn sàng — Gửi ' + w.jobs.length + ' jobs', 'ok');
+        var cfg = getConfig();
+        CH.postMessage({ type: 'RUN', wid: wid, jobs: w.jobs, config: cfg });
+        // Cập nhật dot header
+        var allReady = WORKERS.every(function (x) { return x.status !== 'idle'; });
         if (allReady) {
-          var dot = document.getElementById('a3m-sdot'); if (dot) dot.classList.add('on');
-          var stxt = document.getElementById('a3m-stxt'); if (stxt) stxt.textContent = WORKERS.length + ' worker đang hoạt động';
+          var dot = document.getElementById('a3b-hdot'); if (dot) { dot.style.background = '#10b981'; dot.style.boxShadow = '0 0 6px #10b98160'; }
+          setText('a3b-hstatus', WORKERS.length + ' worker đang hoạt động');
         }
-        // Gửi jobs
-        var style = document.getElementById('a3m-style') ? document.getElementById('a3m-style').value : '3D Pixar Cute';
-        var mood  = document.getElementById('a3m-mood')  ? document.getElementById('a3m-mood').value  : 'Hau dau & Hai huoc';
-        ch.postMessage({ type: 'RUN', wid: wid, jobs: w.jobs, style: style, mood: mood });
-      }
-      else if (msg.type === 'QUOTA') {
-        var qel = document.getElementById('a3m-quota'); if (qel) qel.textContent = msg.remaining + '/' + msg.limit + ' video còn';
       }
       else if (msg.type === 'JOB_START') {
         w.status = 'running'; w.step = 'script'; w.progress = 10;
-        var job = w.jobs.find(function(j) { return j.id === msg.jobId; });
+        var job = w.jobs.find(function (j) { return j.id === msg.jobId; });
         if (job) { job.status = 'running'; w.currentJob = job; }
-        log('Worker ' + (wid+1) + ' ▶ ' + (msg.nhanVat||'').slice(0,40), 'r');
-        updCard(wid); updStats();
+        log('W' + (wid + 1) + ' ▶ ' + (msg.nhanVat || '').slice(0, 45), 'r');
+        updStats();
       }
       else if (msg.type === 'STEP') {
         w.step = msg.step; w.progress = msg.progress;
-        var sn = {script:'Gen kịch bản',img:'Tạo ảnh',vid:'Tạo video'};
-        log('Worker ' + (wid+1) + ' — ' + (sn[msg.step]||msg.step) + ' ' + msg.progress + '%', 'b');
-        updCard(wid);
+        var snames = { script: 'Tạo kịch bản', img: 'Tạo ảnh', vid: 'Tạo video', retry: 'Retry lỗi', download: 'Tải về' };
+        log('W' + (wid + 1) + ' — ' + (snames[msg.step] || msg.step) + ' ' + msg.progress + '%', 'b');
+        updStats();
       }
       else if (msg.type === 'JOB_DONE') {
-        w.doneC = (w.doneC||0) + 1;
-        w.vidC  = (w.vidC||0)  + (msg.videos ? msg.videos.length : 0);
-        totalClips += (msg.videos ? msg.videos.length : 0);
-        var job2 = w.jobs.find(function(j) { return j.id === msg.jobId; }); if (job2) job2.status = 'done';
+        w.doneC = (w.doneC || 0) + 1;
+        var job2 = w.jobs.find(function (j) { return j.id === msg.jobId; }); if (job2) job2.status = 'done';
         w.currentJob = null;
-        log('Worker ' + (wid+1) + ' ✓ "' + (msg.topicTitle||'') + '" — ' + (msg.videos ? msg.videos.length : 0) + ' clip', 'ok');
+        totalClips++;
+        log('W' + (wid + 1) + ' ✓ "' + (msg.topicTitle || '').slice(0, 40) + '"', 'ok');
         addResult(Object.assign({}, msg, { wid: wid, status: 'done' }));
-        updCard(wid); updStats();
+        updStats();
       }
       else if (msg.type === 'JOB_ERR') {
-        w.errC = (w.errC||0) + 1;
-        var job3 = w.jobs.find(function(j) { return j.id === msg.jobId; }); if (job3) job3.status = 'error';
+        w.errC = (w.errC || 0) + 1;
+        var job3 = w.jobs.find(function (j) { return j.id === msg.jobId; }); if (job3) job3.status = 'error';
         w.currentJob = null;
-        log('Worker ' + (wid+1) + ' ✗ ' + msg.errorMsg, 'e');
+        log('W' + (wid + 1) + ' ✗ ' + (msg.errorMsg || ''), 'e');
         addResult(Object.assign({}, msg, { wid: wid, status: 'error' }));
-        updCard(wid); updStats();
+        updStats();
       }
       else if (msg.type === 'ALL_DONE') {
         w.status = 'done'; w.step = 'done'; w.currentJob = null;
-        log('Worker ' + (wid+1) + ' hoàn thành! (' + (w.doneC||0) + ' xong, ' + (w.errC||0) + ' lỗi)', 'ok');
-        updCard(wid); updStats();
-        if (WORKERS.every(function(x) { return x.status === 'done' || x.status === 'error'; })) ketThuc();
+        log('W' + (wid + 1) + ' hoàn thành! (' + (w.doneC || 0) + ' xong, ' + (w.errC || 0) + ' lỗi)', 'ok');
+        updStats();
+        if (WORKERS.every(function (x) { return x.status === 'done' || x.status === 'error'; })) ketThuc();
       }
     };
   }
 
-  // ── BẮT ĐẦU ───────────────────────────
+  // ── Bắt đầu ──────────────────────────────
   function batDau() {
-    var jobs = parseInput();
+    var jobs = parseJobs();
     if (!jobs.length) { log('⚠ Chưa có kịch bản!', 'e'); return; }
 
-    ALL_JOBS = jobs.map(function(j, i) { return Object.assign({}, j, { id: i, status: 'wait' }); });
-    RESULTS = []; totalClips = 0; running = true; pendingAssign = [];
+    ALL_JOBS = jobs.map(function (j, i) { return Object.assign({}, j, { id: i, status: 'wait' }); });
+    RESULTS = []; totalClips = 0; running = true;
+    pendingAssign = [0, 1]; // 2 workers
+    assignedTabs = {};
 
-    var rlist = document.getElementById('a3m-rlist'); if (rlist) rlist.innerHTML = '<div class="mempty" style="height:100px;display:flex;align-items:center;justify-content:center;color:#2a2a2a;font-size:12px">⚙ Đang sản xuất...</div>';
-    var logEl = document.getElementById('a3m-log'); if (logEl) logEl.innerHTML = '';
-    var go = document.getElementById('a3m-go'); if (go) go.disabled = true;
-    var stop = document.getElementById('a3m-stop'); if (stop) stop.style.display = 'block';
-    switchTab('workers');
-    buildCards(NUM_W);
+    // Reset UI
+    document.getElementById('a3b-log').innerHTML = '';
+    document.getElementById('a3b-rlist').innerHTML = '<div class="a3b-empty" style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">Đang sản xuất...</div>';
+    document.getElementById('a3b-rb').textContent = '0';
+
+    var goBtn = document.getElementById('a3b-go'); if (goBtn) goBtn.disabled = true;
+    var stopBtn = document.getElementById('a3b-stop'); if (stopBtn) stopBtn.style.display = 'block';
+
+    // Phân bổ round-robin cho 2 workers
+    var q0 = [], q1 = [];
+    ALL_JOBS.forEach(function (j, i) { (i % 2 === 0 ? q0 : q1).push(Object.assign({}, j)); });
+
+    WORKERS = [
+      { wid: 0, tabId: null, status: 'idle', jobs: q0, doneC: 0, errC: 0, currentJob: null, step: null, progress: 0 },
+      { wid: 1, tabId: null, status: 'idle', jobs: q1, doneC: 0, errC: 0, currentJob: null, step: null, progress: 0 }
+    ];
+
     logSep();
-    log('══ Bắt đầu ' + ALL_JOBS.length + ' video với ' + NUM_W + ' worker ══', 'ok');
-    // Hiện hint mở tab thủ công
-    var hint = document.getElementById('a3m-open-hint');
-    var hintN = document.getElementById('a3m-hint-n');
-    if (hint) { hint.style.display = 'block'; }
-    if (hintN) { hintN.textContent = NUM_W; }
+    log('══ Bắt đầu ' + ALL_JOBS.length + ' kịch bản · 2 workers ══', 'r');
+    log('W1: ' + q0.length + ' jobs · W2: ' + q1.length + ' jobs', 'h');
+    logSep();
+    log('👉 Mở 2 tab 3big.online mới: Ctrl+T → 3big.online → Enter', 'r');
 
-    // Phân bổ jobs round-robin
-    var queues = [];
-    for (var i = 0; i < NUM_W; i++) queues.push([]);
-    ALL_JOBS.forEach(function(j, i) { queues[i % NUM_W].push(Object.assign({}, j)); });
+    // Hiện hint
+    var hint = document.getElementById('a3b-hint'); if (hint) hint.style.display = 'block';
 
-    WORKERS = queues.map(function(q, i) {
-      return { wid: i, tabId: null, status: 'idle', jobs: q, doneC: 0, errC: 0, vidC: 0, currentJob: null, step: null, progress: 0 };
-    });
-    WORKERS.forEach(function(_, i) { pendingAssign.push(i); });
-
-    // Mở worker tabs
-    WORKERS.forEach(function(w, i) {
-      setTimeout(function() {
-        window.open('https://3big.online', '_blank');
-        log('Đã mở Worker ' + (i+1) + ' (' + w.jobs.length + ' jobs) — Tampermonkey sẽ tự inject', 'b');
-      }, i * 3000);
-    });
-    
-    // Thông báo cho user nếu sau 15 giây vẫn còn worker chưa kết nối
-    setTimeout(function() {
-      var missing = WORKERS.filter(function(w) { return !w.tabId; });
-      if (missing.length > 0 && running) {
-        log('⚠ Worker ' + missing.map(function(w){return w.wid+1;}).join(',') + ' chưa kết nối — Thử reload tab đó!', 'e');
-      }
-    }, 15000);
-
+    switchTab('workers');
     updStats();
   }
 
   function ketThuc() {
     running = false;
-    var go = document.getElementById('a3m-go'); if (go) go.disabled = false;
-    var stop = document.getElementById('a3m-stop'); if (stop) stop.style.display = 'none';
-    var dot = document.getElementById('a3m-sdot'); if (dot) dot.classList.remove('on');
-    var stxt = document.getElementById('a3m-stxt'); if (stxt) stxt.textContent = 'Hoàn thành!';
-    var done = RESULTS.filter(function(r) { return r.status === 'done'; }).length;
-    var err  = RESULTS.filter(function(r) { return r.status === 'error'; }).length;
+    var goBtn = document.getElementById('a3b-go'); if (goBtn) goBtn.disabled = false;
+    var stopBtn = document.getElementById('a3b-stop'); if (stopBtn) stopBtn.style.display = 'none';
+    var hint = document.getElementById('a3b-hint'); if (hint) hint.style.display = 'none';
+    var dot = document.getElementById('a3b-hdot'); if (dot) { dot.style.background = '#9ca3af'; dot.style.boxShadow = 'none'; }
+    setText('a3b-hstatus', 'Hoàn thành');
+    var done = RESULTS.filter(function (r) { return r.status === 'done'; }).length;
     logSep();
-    log('══ Xong! ' + done + '/' + ALL_JOBS.length + ' video ✓ | ' + err + ' lỗi | ' + totalClips + ' clip ══', 'ok');
-    updStats(); switchTab('results');
+    log('══ Xong! ' + done + '/' + ALL_JOBS.length + ' video ✓ · ' + totalClips + ' clip đã tải ══', 'ok');
+    updStats();
+    switchTab('results');
   }
 
-  // ── PUBLIC ─────────────────────────────
-  return {
-    init: function() { initChannel(); },
-    batDau: batDau,
-    dung: function() {
-      running = false;
-      if (ch) ch.postMessage({ type: 'STOP' });
-      var go = document.getElementById('a3m-go'); if (go) go.disabled = false;
-      var stop = document.getElementById('a3m-stop'); if (stop) stop.style.display = 'none';
-      log('⏹ Đã dừng', 'e');
-    },
-    setNumW: function(n) { NUM_W = n; },
-    dlResult: function(idx) {
-      var r = RESULTS[idx]; if (!r || !r.videos) return;
-      r.videos.forEach(function(url, i) {
-        if (url) setTimeout(function() {
-          var a = document.createElement('a'); a.href = url; a.download = '3big_' + (idx+1) + '_s' + (i+1) + '.mp4';
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        }, i * 700);
-      });
-    }
-  };
+  function dung() {
+    running = false;
+    CH.postMessage({ type: 'STOP' });
+    var goBtn = document.getElementById('a3b-go'); if (goBtn) goBtn.disabled = false;
+    var stopBtn = document.getElementById('a3b-stop'); if (stopBtn) stopBtn.style.display = 'none';
+    log('⏹ Đã dừng', 'e');
+  }
 
+  function switchTab(name) {
+    document.querySelectorAll('#a3b-win .a3b-tab, #a3b-win .a3b-pane').forEach(function (el) { el.classList.remove('on'); });
+    var t = document.querySelector('#a3b-win .a3b-tab[data-t="' + name + '"]');
+    var p = document.getElementById('a3b-p-' + name);
+    if (t) t.classList.add('on');
+    if (p) p.classList.add('on');
+  }
+
+  return { init: initChannel, batDau: batDau, dung: dung, switchTab: switchTab };
 })();
