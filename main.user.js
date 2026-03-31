@@ -6,11 +6,8 @@
 // @match        https://3big.online/*
 // @grant        none
 // @run-at       document-idle
-// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto/main/api.js
-// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto/main/worker.js
-// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto/main/manager.js
-// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto/main/ui.js
+// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto-studio/main/api.js
+// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto-studio/main/worker.js
+// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto-studio/main/manager.js
+// @require      https://raw.githubusercontent.com/vtpsproduction/3big-auto-studio/main/ui.js
 // ==/UserScript==
-
-// Không cần viết gì thêm — tất cả logic nằm trong các file @require
-// Muốn sửa code chỉ cần edit file trên GitHub, không cần đụng Tampermonkey
