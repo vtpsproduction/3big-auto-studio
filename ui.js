@@ -128,7 +128,7 @@
 .mb3{background:#0a1a10;color:#5DCAA5;border:1px solid #1a4428}
 .mb4{background:#1a0808;color:#F09595;border:1px solid #441a1a}
 .mwbody{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
-.mwcj{font-size:11px;color:#888;min-height:28px;line-height:1.5}
+.mwcj{font-size:11px;color:#888;min-height:28px;line-height:1.5}.mwnd{font-size:10px;color:#555;line-height:1.5;margin-top:2px;font-style:italic}
 .mwstep{font-size:10px;color:#444}
 .mwpbar{height:3px;background:#1a1a1a;border-radius:2px;overflow:hidden}
 .mwpfill{height:100%;background:#f5c842;width:0;transition:width .4s;border-radius:2px}
