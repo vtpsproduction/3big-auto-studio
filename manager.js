@@ -166,6 +166,9 @@ var A3B_MANAGER = (function() {
 
       if (msg.type === 'WORKER_ONLINE') {
         if (!running) return;
+        // Bỏ qua tab đã assign rồi
+        var already = WORKERS.some(function(w) { return w.tabId === msg.tabId; });
+        if (already) return;
         var wid = pendingAssign.shift();
         if (wid === undefined) return;
         WORKERS[wid].tabId = msg.tabId;
