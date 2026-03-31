@@ -233,6 +233,10 @@ label{font-size:10px;color:#444;margin-bottom:4px;display:block}
     <div class="a3mpbar"><div class="a3mpfill" id="a3m-fill"></div></div>
     <div class="a3mpi"><span id="a3m-pdone">0 / 0 video</span><span id="a3m-pst">Sẵn sàng</span></div>
     <button class="a3mbtn" id="a3m-go">⚡ Bắt đầu sản xuất</button>
+    <div id="a3m-open-hint" style="display:none;background:#141414;border:1px solid #554400;border-radius:8px;padding:10px 12px;font-size:11px;color:#f5c842;line-height:1.7">
+      ⚡ Jobs đã phân bổ! Bây giờ mở <b id="a3m-hint-n">2</b> tab 3big.online mới:<br>
+      <span style="color:#888">Ctrl+T → gõ 3big.online → Enter<br>Mỗi tab sẽ tự nhận jobs và chạy!</span>
+    </div>
     <button class="a3mstop" id="a3m-stop">⏹ Dừng tất cả</button>
   </div>
 </div>
