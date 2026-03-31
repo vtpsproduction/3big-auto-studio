@@ -92,7 +92,11 @@ var A3B_WORKER = (function() {
     // Tạo tab ID ngẫu nhiên
     window.__a3bTabId = Math.random().toString(36).slice(2, 8);
 
-    // Báo manager online
+    // Báo manager online — retry mỗi 2 giây cho đến khi được assign
+    var onlineInterval = setInterval(function() {
+      if (myWid !== null) { clearInterval(onlineInterval); return; }
+      ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId });
+    }, 2000);
     setTimeout(function() {
       ch.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId });
     }, 500);
