@@ -250,6 +250,11 @@ var A3B_MANAGER = (function() {
     buildCards(NUM_W);
     logSep();
     log('══ Bắt đầu ' + ALL_JOBS.length + ' video với ' + NUM_W + ' worker ══', 'ok');
+    // Hiện hint mở tab thủ công
+    var hint = document.getElementById('a3m-open-hint');
+    var hintN = document.getElementById('a3m-hint-n');
+    if (hint) { hint.style.display = 'block'; }
+    if (hintN) { hintN.textContent = NUM_W; }
 
     // Phân bổ jobs round-robin
     var queues = [];
@@ -265,9 +270,17 @@ var A3B_MANAGER = (function() {
     WORKERS.forEach(function(w, i) {
       setTimeout(function() {
         window.open('https://3big.online', '_blank');
-        log('Mở Worker ' + (i+1) + ' — ' + w.jobs.length + ' jobs', 'b');
-      }, i * 2500);
+        log('Đã mở Worker ' + (i+1) + ' (' + w.jobs.length + ' jobs) — Tampermonkey sẽ tự inject', 'b');
+      }, i * 3000);
     });
+    
+    // Thông báo cho user nếu sau 15 giây vẫn còn worker chưa kết nối
+    setTimeout(function() {
+      var missing = WORKERS.filter(function(w) { return !w.tabId; });
+      if (missing.length > 0 && running) {
+        log('⚠ Worker ' + missing.map(function(w){return w.wid+1;}).join(',') + ' chưa kết nối — Thử reload tab đó!', 'e');
+      }
+    }, 15000);
 
     updStats();
   }
