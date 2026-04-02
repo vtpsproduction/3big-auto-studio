@@ -1,211 +1,85 @@
-// worker.js v6 — Click automation đơn giản, chắc chắn
+// ============================================================
+// worker.js v7 — 3BIG Auto Studio
+// Thuật toán chuẩn xác từ 3 lần test thực tế
+// ============================================================
 (function () {
-  var CH = new BroadcastChannel('3big_v5');
+  'use strict';
+
+  // ── Setup ────────────────────────────────────────────────
+  window.alert   = function (m) { console.log('[3BIG dismiss]', m); };
+  window.confirm = function ()  { return true; };
+
+  var CH    = new BroadcastChannel('3big_v5');
   var myWid = null;
   var running = false;
 
-  function sleep(ms) { return new Promise(function(r){ setTimeout(r,ms); }); }
+  // ── Helpers ───────────────────────────────────────────────
 
-  // Chờ điều kiện fn() trả về truthy
-  function until(fn, timeout, tick) {
-    return new Promise(function(resolve, reject) {
-      var start = Date.now(); tick = tick||500;
-      (function check() {
+  function sleep(ms) {
+    return new Promise(function (r) { setTimeout(r, ms); });
+  }
+
+  // Chờ fn() trả về truthy
+  function waitFor(fn, timeout, tick) {
+    timeout = timeout || 30000;
+    tick    = tick    || 800;
+    return new Promise(function (res, rej) {
+      var s = Date.now();
+      (function c() {
         var v = fn();
-        if (v) return resolve(v);
-        if (Date.now()-start > (timeout||30000)) return reject(new Error('Timeout: ' + fn.toString().slice(0,80)));
-        setTimeout(check, tick);
+        if (v) return res(v);
+        if (Date.now() - s > timeout) return rej(new Error('Timeout: ' + fn.toString().slice(0, 60)));
+        setTimeout(c, tick);
       })();
     });
   }
 
-  // Tìm button có text chứa str, không disabled, đang visible
-  function findBtn(str) {
-    return Array.from(document.querySelectorAll('button')).find(function(b){
-      return b.textContent.trim().includes(str) && !b.disabled && b.offsetParent !== null;
+  // RC click — mousedown + mouseup + click (cho React)
+  function RC(el) {
+    if (!el || !el.scrollIntoView) return;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    ['mousedown', 'mouseup', 'click'].forEach(function (t) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
     });
   }
 
-  function report(type, data) {
-    var obj = {type:type, wid:myWid};
-    if (data) Object.keys(data).forEach(function(k){ obj[k]=data[k]; });
-    CH.postMessage(obj);
+  // Tìm button theo text (không check #a3b-win panel)
+  function findBtn(text, exact) {
+    return Array.from(document.querySelectorAll('button')).find(function (b) {
+      if (b.closest && b.closest('#a3b-win')) return false;
+      var t = b.textContent.trim();
+      return exact ? t === text : t.includes(text);
+    });
   }
 
-  function setBadge(txt, color) {
+  // fillSelect + fillInput
+  function fillS(idx, val) {
+    var s = document.querySelectorAll('select')[idx];
+    if (!s) return;
+    var o = Array.from(s.options).find(function (o) { return o.text.includes(val); });
+    if (!o) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, o.value);
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function fillI(idx, val) {
+    var el = document.querySelectorAll('input[type="text"]')[idx];
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, val);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Badge
+  function badge(txt, color) {
     var b = document.getElementById('a3b-w-badge');
     if (!b) return;
-    b.querySelector('.a3b-w-txt').textContent = txt;
-    b.querySelector('.a3b-w-dot').style.background = color||'#FF6B35';
-    b.style.borderColor = color||'#FF6B35';
+    var dot = b.querySelector('.a3b-w-dot');
+    var span = b.querySelector('.a3b-w-txt');
+    if (span) span.textContent = txt;
+    if (dot)  dot.style.background = color || '#FF6B35';
+    b.style.borderColor = color || '#FF6B35';
   }
 
-  // Điền select
-  function setSelect(idx, value) {
-    var sel = document.querySelectorAll('select')[idx]; if (!sel) return;
-    var opt = Array.from(sel.options).find(function(o){ return o.text.trim()===value||o.value===value; });
-    if (!opt) return;
-    var setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,'value').set;
-    setter.call(sel, opt.value);
-    sel.dispatchEvent(new Event('change',{bubbles:true}));
-  }
-
-  // Điền input
-  function setInput(idx, val) {
-    var inp = document.querySelectorAll('input[type="text"]')[idx]; if (!inp) return;
-    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-    setter.call(inp, val);
-    inp.dispatchEvent(new Event('input',{bubbles:true}));
-  }
-
-  // ── CHẠY 1 JOB ──────────────────────────────────
-  async function runJob(job, config) {
-    report('JOB_START', {jobId:job.id, nhanVat:job.nhanVat});
-
-    try {
-      // ẨN panel manager để không che giao diện
-      var mgr = document.getElementById('a3b-win');
-      var tog = document.getElementById('a3b-toggle');
-      if (mgr) mgr.style.display = 'none';
-      if (tog) tog.style.display = 'none';
-      await sleep(300);
-
-      // BƯỚC 1: Điền form
-      setBadge('⚙ Điền form...', '#6366f1');
-      report('STEP', {jobId:job.id, step:'script', progress:5});
-      await sleep(500);
-
-      setSelect(0, config.phongCach || '3D Pixar Cute');
-      await sleep(200);
-      setSelect(1, config.ngonNgu || '🇻🇳 Tiếng Việt');
-      await sleep(200);
-      setSelect(2, config.danhMuc || 'Mẹo Vặt Cuộc Sống');
-      await sleep(200);
-      setSelect(3, config.tone || 'Hậu đậu & Hài hước');
-      await sleep(200);
-
-      // Tỉ lệ
-      var tiLe = config.tiLe === '16:9' ? '16:9 Ngang' : '9:16 Dọc';
-      var tiLeBtn = Array.from(document.querySelectorAll('button')).find(function(b){
-        return b.textContent.trim().includes(tiLe);
-      });
-      if (tiLeBtn) tiLeBtn.click();
-      await sleep(200);
-
-      setInput(0, job.nhanVat);
-      await sleep(200);
-      setInput(1, job.noiDung);
-      await sleep(500);
-
-      // BƯỚC 2: Bấm "Tạo Ảnh & Phim"
-      setBadge('🎬 Tạo kịch bản...', '#FF6B35');
-      report('STEP', {jobId:job.id, step:'script', progress:10});
-      var taoBtn = findBtn('Tạo Ảnh & Phim');
-      if (!taoBtn) throw new Error('Không tìm được nút Tạo Ảnh & Phim');
-      taoBtn.click();
-
-      // BƯỚC 3: Chờ Batch List xuất hiện (kịch bản gen xong)
-      setBadge('⏳ Chờ kịch bản...', '#FF6B35');
-      await until(function(){
-        return Array.from(document.querySelectorAll('button')).some(function(b){
-          return b.textContent.includes('Batch List') && b.offsetParent !== null;
-        });
-      }, 90000, 1000);
-      await sleep(1500);
-
-      // BƯỚC 4: Click tab Batch List
-      var batchTab = Array.from(document.querySelectorAll('button')).find(function(b){
-        return b.textContent.includes('Batch List') && b.offsetParent !== null;
-      });
-      if (batchTab) { batchTab.click(); await sleep(1500); }
-
-      // BƯỚC 5: Bấm "Tạo Ảnh"
-      setBadge('🖼 Bấm Tạo Ảnh...', '#FF6B35');
-      report('STEP', {jobId:job.id, step:'img', progress:30});
-      var taoAnhBtn = await until(function(){ return findBtn('Tạo Ảnh'); }, 15000, 800);
-      taoAnhBtn.click();
-      await sleep(2000);
-
-      // BƯỚC 6: Chờ ảnh xong
-      setBadge('🖼 Đang tạo ảnh...', '#f59e0b');
-      await until(function(){
-        // Nút Đang tạo phải biến mất
-        var dangTao = Array.from(document.querySelectorAll('button')).find(function(b){
-          return b.textContent.includes('Đang tạo') && b.offsetParent !== null;
-        });
-        if (dangTao) return false;
-        // Phải có ảnh hiện trong bảng (img tag trong cột Hình Ảnh)
-        var imgs = document.querySelectorAll('img[src*="http"]');
-        var hasAnhMoi = Array.from(imgs).some(function(img){
-          return img.src.includes('nano') || img.src.includes('cloudinary') || img.src.includes('storage') || img.src.includes('generate');
-        });
-        if (hasAnhMoi) return true;
-        // Fallback: nút Tạo Ảnh active = xong
-        return !!findBtn('Tạo Ảnh');
-      }, 180000, 2000);
-      setBadge('✓ Ảnh xong!', '#10b981');
-      await sleep(2000);
-
-      // BƯỚC 7: Bấm "Tạo Video"
-      setBadge('🎬 Bấm Tạo Video...', '#FF6B35');
-      report('STEP', {jobId:job.id, step:'vid', progress:55});
-      var taoVidBtn = await until(function(){ return findBtn('Tạo Video'); }, 15000, 800);
-      taoVidBtn.click();
-      await sleep(3000);
-
-      // BƯỚC 8: Chờ video xong — "Tải Video (N)" với N > 0
-      setBadge('🎬 Đang render video...', '#f59e0b');
-      await until(function(){
-        return Array.from(document.querySelectorAll('button')).find(function(b){
-          if (!b.textContent.includes('Tải Video')) return false;
-          var m = b.textContent.match(/\((\d+)\)/);
-          return m && parseInt(m[1]) > 0;
-        });
-      }, 600000, 3000);
-      await sleep(1000);
-
-      // BƯỚC 9: Nếu có lỗi → Tạo lại
-      var loiBtn = findBtn('Tạo Lại Video Lỗi');
-      if (loiBtn) {
-        setBadge('⚠ Tạo lại video lỗi...', '#f59e0b');
-        loiBtn.click();
-        await sleep(3000);
-        await until(function(){
-          return Array.from(document.querySelectorAll('button')).find(function(b){
-            if (!b.textContent.includes('Tải Video')) return false;
-            var m = b.textContent.match(/\((\d+)\)/);
-            return m && parseInt(m[1]) > 0;
-          });
-        }, 300000, 3000);
-        await sleep(1000);
-      }
-
-      // BƯỚC 10: Bấm "Tải Video"
-      setBadge('⬇ Tải video...', '#10b981');
-      report('STEP', {jobId:job.id, step:'download', progress:90});
-      var taiBtn = findBtn('Tải Video');
-      if (taiBtn) { taiBtn.click(); await sleep(2000); }
-
-      report('JOB_DONE', {jobId:job.id, topicTitle:job.nhanVat.slice(0,40)});
-      setBadge('✅ Job xong!', '#10b981');
-      // Hiện lại panel manager
-      var mgr2 = document.getElementById('a3b-win');
-      var tog2 = document.getElementById('a3b-toggle');
-      if (mgr2) mgr2.style.display = '';
-      if (tog2) tog2.style.display = '';
-
-    } catch(err) {
-      var mgr3 = document.getElementById('a3b-win');
-      var tog3 = document.getElementById('a3b-toggle');
-      if (mgr3) mgr3.style.display = '';
-      if (tog3) tog3.style.display = '';
-      report('JOB_ERR', {jobId:job.id, errorMsg:err.message});
-      setBadge('✗ ' + err.message.slice(0,40), '#ef4444');
-    }
-    await sleep(2000);
-  }
-
-  // ── BADGE ────────────────────────────────────
   function injectBadge() {
     if (document.getElementById('a3b-w-badge')) return;
     var st = document.createElement('style');
@@ -218,59 +92,287 @@
     document.body.appendChild(el);
   }
 
-  // ── INIT ────────────────────────────────────
+  function report(type, data) {
+    var obj = { type: type, wid: myWid };
+    if (data) Object.keys(data).forEach(function (k) { obj[k] = data[k]; });
+    CH.postMessage(obj);
+  }
+
+  // ── MAIN FLOW ─────────────────────────────────────────────
+
+  async function runJob(job, config) {
+    report('JOB_START', { jobId: job.id, nhanVat: job.nhanVat });
+
+    try {
+      // S1: Điền form
+      badge('⚙ Điền form...', '#6366f1');
+      report('STEP', { jobId: job.id, step: 'script', progress: 5 });
+      fillS(0, config.phongCach || '3D Pixar Cute');
+      fillS(1, config.ngonNgu  || 'Tiếng Việt');
+      fillS(2, config.danhMuc  || 'Mẹo Vặt');
+      fillS(3, config.tone     || 'Hậu đậu');
+      await sleep(300);
+      fillI(0, job.nhanVat);
+      fillI(1, job.noiDung);
+      await sleep(400);
+
+      // Tỉ lệ khung hình
+      var tiLe = (config.tiLe === '16:9') ? '16:9 Ngang' : '9:16 Dọc';
+      var tiLeBtn = findBtn(tiLe, false);
+      if (tiLeBtn) tiLeBtn.click();
+      await sleep(200);
+
+      // S2: Bấm Tạo Ảnh & Phim
+      badge('🎬 Tạo kịch bản...', '#FF6B35');
+      var taoBtn = await waitFor(function () {
+        return findBtn('Tạo Ảnh & Phim', false);
+      }, 10000);
+      taoBtn.scrollIntoView({ block: 'center', behavior: 'instant' });
+      taoBtn.click();
+      report('STEP', { jobId: job.id, step: 'script', progress: 10 });
+
+      // S3: Chờ Batch List → click + verify "Tạo Ảnh" xuất hiện
+      // Phải verify vì React tab switch không lúc nào cũng thành công ngay
+      badge('⏳ Chờ kịch bản...', '#FF6B35');
+      await waitFor(function () {
+        return Array.from(document.querySelectorAll('button')).some(function (b) {
+          return b.textContent.includes('Batch List') && b.offsetParent !== null;
+        });
+      }, 90000, 1000);
+      await sleep(1000);
+
+      var batchOK = false;
+      for (var attempt = 0; attempt < 8; attempt++) {
+        var bl = Array.from(document.querySelectorAll('button')).find(function (b) {
+          return b.textContent.includes('Batch List') && b.offsetParent !== null;
+        });
+        if (bl) RC(bl);
+        // Verify: chờ "Tạo Ảnh" button (exact text) xuất hiện = tab đã switch
+        var switched = await new Promise(function (res) {
+          var s = Date.now();
+          (function c() {
+            var ok = Array.from(document.querySelectorAll('button')).find(function (b) {
+              if (b.closest && b.closest('#a3b-win')) return false;
+              return b.textContent.trim() === 'Tạo Ảnh' && b.offsetParent !== null;
+            });
+            if (ok)              return res(true);
+            if (Date.now()-s > 2000) return res(false);
+            setTimeout(c, 300);
+          })();
+        });
+        if (switched) { batchOK = true; break; }
+        await sleep(600);
+      }
+      if (!batchOK) throw new Error('Batch List tab không switch sau 8 lần thử');
+      badge('📋 Batch List OK', '#10b981');
+
+      // S4: Click Tạo Ảnh (textContent === 'Tạo Ảnh', không phải aria-label)
+      badge('🖼 Tạo ảnh...', '#FF6B35');
+      report('STEP', { jobId: job.id, step: 'img', progress: 30 });
+      var taoAnhBtn = await waitFor(function () {
+        return Array.from(document.querySelectorAll('button')).find(function (b) {
+          if (b.closest && b.closest('#a3b-win')) return false;
+          return b.textContent.trim() === 'Tạo Ảnh' && !b.disabled && b.offsetParent !== null;
+        });
+      }, 10000);
+      taoAnhBtn.scrollIntoView({ block: 'center', behavior: 'instant' });
+      taoAnhBtn.click();
+      await sleep(2000);
+
+      // S5: Poll per-row — ảnh scene nào xong thì click Create video ngay
+      // QUAN TRỌNG: dùng img.naturalWidth > 0 (KHÔNG dùng img.src — bị extension block)
+      // TR = btn.parentElement.parentElement.parentElement (DIV → TD → TR)
+      // Dừng khi: không còn "Đang tạo" VÀ không còn Create button nào
+      badge('🖼 Tạo ảnh + video...', '#FF6B35');
+      report('STEP', { jobId: job.id, step: 'vid', progress: 50 });
+      var clickedRows = {};
+
+      await new Promise(function (res, rej) {
+        var start = Date.now();
+        var iv = setInterval(function () {
+
+          // Tìm tất cả Create buttons trong cột Video
+          var creates = Array.from(document.querySelectorAll('button')).filter(function (b) {
+            if (b.closest && b.closest('#a3b-win')) return false;
+            return b.textContent.trim() === 'Create' && !b.disabled && b.offsetParent !== null;
+          });
+
+          // Click Create của row nào đã có ảnh
+          creates.forEach(function (btn, i) {
+            if (clickedRows[i]) return;
+            var tr = btn.parentElement &&
+                     btn.parentElement.parentElement &&
+                     btn.parentElement.parentElement.parentElement; // DIV > TD > TR
+            if (!tr) return;
+            var img = tr.querySelector('img');
+            // naturalWidth > 0 = ảnh đã load xong (không dùng src vì bị block)
+            if (img && img.naturalWidth > 0) {
+              clickedRows[i] = true;
+              RC(btn);
+              console.log('[3BIG] Scene ' + (i+1) + ' ảnh xong → Create video ✓');
+            }
+          });
+
+          // Điều kiện dừng: không còn "Đang tạo" VÀ không còn Create nào
+          var dangTao = Array.from(document.querySelectorAll('button')).find(function (b) {
+            if (b.closest && b.closest('#a3b-win')) return false;
+            return b.textContent.includes('Đang tạo') && b.offsetParent !== null;
+          });
+          var remainCreate = Array.from(document.querySelectorAll('button')).filter(function (b) {
+            if (b.closest && b.closest('#a3b-win')) return false;
+            return b.textContent.trim() === 'Create' && !b.disabled && b.offsetParent !== null;
+          });
+
+          // Dừng: ảnh xong hết + không còn Create button nào chưa click
+          if (!dangTao && remainCreate.length === 0 && Object.keys(clickedRows).length > 0) {
+            clearInterval(iv);
+            console.log('[3BIG] S5 done: tất cả scenes đã tạo video');
+            res();
+            return;
+          }
+
+          if (Date.now() - start > 300000) { // 5 phút
+            clearInterval(iv);
+            rej(new Error('S5 timeout 5min'));
+          }
+        }, 1500);
+      });
+
+      // S6: Chờ TẤT CẢ video render xong
+      // Điều kiện đồng thời:
+      // 1. Không còn % progress (không còn scene nào đang render)
+      // 2. Không còn Create button (tất cả đã click)
+      // 3. "Tải Video (N)" với N > 0 trong toolbar Batch List
+      badge('🎬 Render video...', '#f59e0b');
+      report('STEP', { jobId: job.id, step: 'vid', progress: 70 });
+
+      await waitFor(function () {
+        // 1. Còn % không?
+        var hasPct = Array.from(document.querySelectorAll('*')).some(function (el) {
+          return el.children.length === 0 && /^\d+%$/.test(el.textContent.trim());
+        });
+        if (hasPct) return false;
+
+        // 2. Còn Create không?
+        var hasCreate = Array.from(document.querySelectorAll('button')).some(function (b) {
+          if (b.closest && b.closest('#a3b-win')) return false;
+          return b.textContent.trim() === 'Create' && !b.disabled && b.offsetParent !== null;
+        });
+        if (hasCreate) return false;
+
+        // 3. Tải Video (N>0)?
+        return Array.from(document.querySelectorAll('button')).find(function (b) {
+          if (b.closest && b.closest('#a3b-win')) return false;
+          if (!b.textContent.includes('Tải Video')) return false;
+          var m = b.textContent.match(/\((\d+)\)/);
+          return m && parseInt(m[1]) > 0;
+        });
+      }, 600000, 3000);
+
+      badge('✓ Video xong!', '#10b981');
+      report('STEP', { jobId: job.id, step: 'download', progress: 90 });
+      await sleep(500);
+
+      // S7: Retry nếu có video lỗi
+      var loiBtn = Array.from(document.querySelectorAll('button')).find(function (b) {
+        if (b.closest && b.closest('#a3b-win')) return false;
+        return b.textContent.includes('Tạo Lại Video Lỗi') && !b.disabled && b.offsetParent !== null;
+      });
+      if (loiBtn) {
+        badge('⚠ Retry lỗi...', '#f59e0b');
+        RC(loiBtn);
+        await sleep(5000);
+        // Chờ retry xong
+        await waitFor(function () {
+          var hasPct = Array.from(document.querySelectorAll('*')).some(function (el) {
+            return el.children.length === 0 && /^\d+%$/.test(el.textContent.trim());
+          });
+          if (hasPct) return false;
+          return Array.from(document.querySelectorAll('button')).find(function (b) {
+            if (b.closest && b.closest('#a3b-win')) return false;
+            if (!b.textContent.includes('Tải Video')) return false;
+            var m = b.textContent.match(/\((\d+)\)/);
+            return m && parseInt(m[1]) > 0;
+          });
+        }, 300000, 3000);
+        await sleep(500);
+      }
+
+      // S8: Tải video
+      var taiBtn = Array.from(document.querySelectorAll('button')).find(function (b) {
+        if (b.closest && b.closest('#a3b-win')) return false;
+        return b.textContent.includes('Tải Video') && b.offsetParent !== null;
+      });
+      RC(taiBtn);
+      badge('✅ Job xong!', '#10b981');
+      report('JOB_DONE', { jobId: job.id, topicTitle: job.nhanVat.slice(0, 50) });
+      console.log('[3BIG] ✅ JOB XONG:', job.nhanVat.slice(0, 40));
+
+    } catch (err) {
+      badge('✗ ' + err.message.slice(0, 40), '#ef4444');
+      report('JOB_ERR', { jobId: job.id, errorMsg: err.message });
+      console.error('[3BIG] ERR:', err.message);
+    }
+
+    await sleep(2000);
+  }
+
+  // ── INIT ─────────────────────────────────────────────────
+
   function init() {
     if (!localStorage.getItem('3big_session')) return;
-    if (window.__a3bIsManager) return; // Manager tab bỏ qua
+    if (window.__a3bIsManager) return; // manager tab bỏ qua
+
     injectBadge();
+    window.__a3bTabId  = Math.random().toString(36).slice(2, 10);
+    window.__a3bStamp  = Date.now();
 
-    // Auto-dismiss alert/confirm popup của 3big
-    window.__origAlert = window.alert;
-    window.__origConfirm = window.confirm;
-    window.alert = function(msg) { console.log('[3BIG] Auto-dismiss alert:', msg); };
-    window.confirm = function(msg) { console.log('[3BIG] Auto-confirm:', msg); return true; };
-
-    window.__a3bTabId = Math.random().toString(36).slice(2, 10);
-    window.__a3bStamp = Date.now();
-
-    // Retry báo online mỗi 2s
+    // Báo online với manager, retry mỗi 2s
     var retries = 0;
-    var iv = setInterval(function(){
-      if (myWid !== null || retries++ > 25) { clearInterval(iv); return; }
-      CH.postMessage({type:'WORKER_ONLINE', tabId:window.__a3bTabId, stamp:window.__a3bStamp});
+    var iv = setInterval(function () {
+      if (myWid !== null || retries++ > 30) { clearInterval(iv); return; }
+      CH.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId, stamp: window.__a3bStamp });
     }, 2000);
-    setTimeout(function(){
-      CH.postMessage({type:'WORKER_ONLINE', tabId:window.__a3bTabId, stamp:window.__a3bStamp});
+    setTimeout(function () {
+      CH.postMessage({ type: 'WORKER_ONLINE', tabId: window.__a3bTabId, stamp: window.__a3bStamp });
     }, 800);
 
-    CH.onmessage = async function(e) {
-      var msg = e.data; if (!msg||!msg.type) return;
+    CH.onmessage = async function (e) {
+      var msg = e.data;
+      if (!msg || !msg.type) return;
 
       if (msg.type === 'ASSIGN' && msg.tabId === window.__a3bTabId) {
         myWid = msg.wid;
         clearInterval(iv);
-        setBadge('✓ Worker '+(myWid+1)+' — Sẵn sàng', '#10b981');
+        badge('✓ Worker ' + (myWid + 1) + ' — Sẵn sàng', '#10b981');
         report('READY', {});
       }
 
       if (msg.type === 'RUN' && msg.wid === myWid) {
         running = true;
-        var jobs = msg.jobs||[];
-        var config = msg.config||{};
-        for (var i=0; i<jobs.length; i++) {
+        var jobs   = msg.jobs   || [];
+        var config = msg.config || {};
+
+        for (var i = 0; i < jobs.length; i++) {
           if (!running) break;
-          setBadge('▶ Job '+(i+1)+'/'+jobs.length, '#FF6B35');
+          badge('▶ Job ' + (i+1) + '/' + jobs.length, '#FF6B35');
           await runJob(jobs[i], config);
-          if (i<jobs.length-1 && running) await sleep(2000);
+          if (i < jobs.length - 1 && running) await sleep(2000);
         }
-        setBadge('✅ Xong '+jobs.length+' jobs!', '#10b981');
+
+        badge('✅ Xong ' + jobs.length + ' jobs!', '#10b981');
         report('ALL_DONE', {});
+        running = false;
       }
 
-      if (msg.type === 'STOP') { running = false; setBadge('⏹ Dừng', '#6b7280'); }
+      if (msg.type === 'STOP') {
+        running = false;
+        badge('⏹ Dừng', '#6b7280');
+      }
     };
   }
 
-  if (document.readyState==='complete') setTimeout(init, 2000);
-  else window.addEventListener('load', function(){ setTimeout(init, 2000); });
+  if (document.readyState === 'complete') setTimeout(init, 2000);
+  else window.addEventListener('load', function () { setTimeout(init, 2000); });
+
 })();
