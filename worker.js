@@ -43,6 +43,21 @@
     });
   }
 
+  // reactClick — gọi thẳng React props.onClick (đáng tin cậy hơn RC cho tab switch)
+  function reactClick(el) {
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    // Thử React props trước
+    var propsKey = Object.keys(el).find(function (k) { return k.startsWith('__reactProps'); });
+    if (propsKey && el[propsKey] && el[propsKey].onClick) {
+      el[propsKey].onClick({ type: 'click', target: el, currentTarget: el, bubbles: true, cancelable: true, preventDefault: function(){}, stopPropagation: function(){} });
+      return true;
+    }
+    // Fallback: RC click
+    RC(el);
+    return true;
+  }
+
   // Tìm button theo text (không check #a3b-win panel)
   function findBtn(text, exact) {
     return Array.from(document.querySelectorAll('button')).find(function (b) {
@@ -146,7 +161,7 @@
         var bl = Array.from(document.querySelectorAll('button')).find(function (b) {
           return b.textContent.includes('Batch List') && b.offsetParent !== null;
         });
-        if (bl) RC(bl);
+        if (bl) reactClick(bl);
         // Verify: chờ "Tạo Ảnh" button (exact text) xuất hiện = tab đã switch
         var switched = await new Promise(function (res) {
           var s = Date.now();
