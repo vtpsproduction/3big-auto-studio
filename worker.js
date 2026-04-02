@@ -148,23 +148,21 @@
       taoBtn.click();
       report('STEP', { jobId: job.id, step: 'script', progress: 10 });
 
-      // S3: Chờ Batch List → click + verify "Tạo Ảnh" xuất hiện
-      // Phải verify vì React tab switch không lúc nào cũng thành công ngay
+      // S3: Chờ kịch bản gen xong → click Batch List → verify "Tạo Ảnh" xuất hiện
+      // NOTE: phải chờ gen xong rồi mới click — nếu click lúc đang gen,
+      // React re-render sẽ reset tab về "Kịch Bản"
       badge('⏳ Chờ kịch bản...', '#FF6B35');
-      await waitFor(function () {
-        return Array.from(document.querySelectorAll('button')).some(function (b) {
-          return b.textContent.includes('Batch List') && b.offsetParent !== null;
-        });
-      }, 90000, 1000);
-      await sleep(1000);
 
+      // Chờ "Tạo Ảnh" button xuất hiện trong Batch List = gen xong + tab active
+      // Cách: click Batch List rồi chờ, nếu chưa thấy thì click lại
+      // Dùng clickWithCoords (getBoundingClientRect) — đáng tin nhất
       var batchOK = false;
-      for (var attempt = 0; attempt < 8; attempt++) {
+      for (var attempt = 0; attempt < 20; attempt++) {
         var bl = Array.from(document.querySelectorAll('button')).find(function (b) {
           return b.textContent.includes('Batch List') && b.offsetParent !== null;
         });
         if (bl) clickWithCoords(bl);
-        // Verify: chờ "Tạo Ảnh" button (exact text) xuất hiện = tab đã switch
+        // Chờ "Tạo Ảnh" button — chỉ xuất hiện khi tab active VÀ gen xong
         var switched = await new Promise(function (res) {
           var s = Date.now();
           (function c() {
@@ -172,15 +170,15 @@
               if (b.closest && b.closest('#a3b-win')) return false;
               return b.textContent.trim() === 'Tạo Ảnh' && b.offsetParent !== null;
             });
-            if (ok)              return res(true);
-            if (Date.now()-s > 2000) return res(false);
-            setTimeout(c, 300);
+            if (ok) return res(true);
+            if (Date.now()-s > 5000) return res(false);
+            setTimeout(c, 500);
           })();
         });
         if (switched) { batchOK = true; break; }
-        await sleep(600);
+        await sleep(3000); // Chờ 3s trước khi thử lại (cho gen kịch bản)
       }
-      if (!batchOK) throw new Error('Batch List tab không switch sau 8 lần thử');
+      if (!batchOK) throw new Error('Batch List tab không switch');
       badge('📋 Batch List OK', '#10b981');
 
       // S4: Click Tạo Ảnh (textContent === 'Tạo Ảnh', không phải aria-label)
