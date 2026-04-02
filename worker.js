@@ -43,18 +43,20 @@
     });
   }
 
-  // reactClick — gọi thẳng React props.onClick (đáng tin cậy hơn RC cho tab switch)
-  function reactClick(el) {
+  // clickWithCoords — dispatch MouseEvent với đúng clientX/clientY
+  // React nhận event này vì có coordinates hợp lệ
+  function clickWithCoords(el) {
     if (!el) return false;
     el.scrollIntoView({ block: 'center', behavior: 'instant' });
-    // Thử React props trước
-    var propsKey = Object.keys(el).find(function (k) { return k.startsWith('__reactProps'); });
-    if (propsKey && el[propsKey] && el[propsKey].onClick) {
-      el[propsKey].onClick({ type: 'click', target: el, currentTarget: el, bubbles: true, cancelable: true, preventDefault: function(){}, stopPropagation: function(){} });
-      return true;
-    }
-    // Fallback: RC click
-    RC(el);
+    var r = el.getBoundingClientRect();
+    var cx = r.x + r.width / 2;
+    var cy = r.y + r.height / 2;
+    el.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: cx, clientY: cy,
+      screenX: cx, screenY: cy,
+      button: 0, buttons: 1
+    }));
     return true;
   }
 
@@ -161,7 +163,7 @@
         var bl = Array.from(document.querySelectorAll('button')).find(function (b) {
           return b.textContent.includes('Batch List') && b.offsetParent !== null;
         });
-        if (bl) reactClick(bl);
+        if (bl) clickWithCoords(bl);
         // Verify: chờ "Tạo Ảnh" button (exact text) xuất hiện = tab đã switch
         var switched = await new Promise(function (res) {
           var s = Date.now();
